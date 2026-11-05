@@ -121,6 +121,11 @@ lib/        libhelix: vendored, patched codec-helix (PATCHES.md)
 tools/      play.py (PC stand-in host), link_diag.py, echo_test.py
 ```
 
+## AI assistance
+
+This project was developed with the use of [Claude Code](https://claude.com/claude-code), Anthropic's
+AI coding tool. Commits made with it carry a `Co-Authored-By: Claude` trailer.
+
 ## Licences
 
 The firmware's own code is MIT (`LICENSE`). It links two libraries:
