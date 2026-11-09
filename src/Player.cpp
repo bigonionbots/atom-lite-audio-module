@@ -41,8 +41,30 @@ StreamBufferHandle_t rx = nullptr;
 QueueHandle_t commands = nullptr;
 PcmRing pcm;
 
-libhelix::MP3DecoderHelix mp3;
-libhelix::AACDecoderHelix aac;
+/**
+ * The decoders stay allocated from their first stream on: a new stream of the same codec resets
+ * the one it has (restart()) instead of freeing and allocating it again. Every round trip (a
+ * seek or skip on the host is a Stop and a Start) left the heap ~7 KB smaller and fragmented,
+ * and from the second stream on Bluetooth fell behind: steady underruns, an audible stutter.
+ * Only switching codec, or to a live stream, frees one.
+ */
+class AacDecoder : public libhelix::AACDecoderHelix {
+ public:
+  /** Drops buffered input and the decoder's state from the last stream (not the allocation). */
+  void restart() {
+    frame_buffer.reset();
+    if (decoder) AACFlushCodec(decoder);
+  }
+};
+
+class Mp3Decoder : public libhelix::MP3DecoderHelix {
+ public:
+  /** Drops buffered input. A frame that leans on the old stream's bit reservoir fails once. */
+  void restart() { frame_buffer.reset(); }
+};
+
+Mp3Decoder mp3;
+AacDecoder aac;
 libhelix::CommonHelix* decoder = nullptr;
 
 // Decoder task only: the live (µ-law) stream, when one is playing instead of a compressed one.
@@ -73,6 +95,12 @@ std::atomic<bool> primed{false};
 std::atomic<uint32_t> playedFrames{0};
 std::atomic<uint32_t> playedMsBase{0};
 std::atomic<uint16_t> underruns{0};
+// Diagnostics: underruns while compressed audio was waiting in rx (the decoder fell behind) rather
+// than with rx empty (the host's data stopped coming); logged by the decoder task every few seconds.
+std::atomic<uint32_t> underrunsTotal{0};
+std::atomic<uint32_t> underrunsInputWaiting{0};
+constexpr uint32_t UNDERRUN_LOG_MS = 5000;
+constexpr size_t UNDERRUN_INPUT_BYTES = 1024;
 
 // Decoder task only: resampler state.
 uint32_t resampleStep = 1u << 16;  // source frames per output frame, Q16
@@ -207,7 +235,15 @@ void resetPlayback() {
 void handleCommand(const Command& command, bool& active, bool& flushed) {
   switch (command.kind) {
     case Command::Kind::Start:
-      endDecoder();
+      {
+        libhelix::CommonHelix* const wanted =
+            command.codec == Codec::MuLaw
+                ? nullptr
+                : (command.codec == Codec::AacAdts ? static_cast<libhelix::CommonHelix*>(&aac)
+                                                   : static_cast<libhelix::CommonHelix*>(&mp3));
+        if (decoder != wanted) endDecoder();  // another codec, or live: free the old one
+        live = false;
+      }
       resetPlayback();
       if (command.codec == Codec::MuLaw) {
         live = command.sampleRate > 0 && command.channels == 1;
@@ -223,11 +259,18 @@ void handleCommand(const Command& command, bool& active, bool& flushed) {
           hostlink::log("live stream rejected: %lu Hz, %u channels", static_cast<unsigned long>(command.sampleRate),
                         command.channels);
         }
+      } else if (decoder && *decoder) {
+        // The same codec as the last stream: reuse its decoder.
+        if (decoder == &aac) {
+          aac.restart();
+        } else {
+          mp3.restart();
+        }
+        hostlink::log("%s decoder reused, free heap %lu", decoder == &aac ? "AAC" : "MP3",
+                      static_cast<unsigned long>(ESP.getFreeHeap()));
       } else {
         decoder = command.codec == Codec::AacAdts ? static_cast<libhelix::CommonHelix*>(&aac)
                                                   : static_cast<libhelix::CommonHelix*>(&mp3);
-      }
-      if (decoder) {
         const uint32_t heapBefore = ESP.getFreeHeap();
         if (!decoder->begin()) {
           hostlink::log("decoder start failed, free heap %lu, largest block %lu",
@@ -248,7 +291,8 @@ void handleCommand(const Command& command, bool& active, bool& flushed) {
       if (command.streamId == currentStream) endReceived = true;
       break;
     case Command::Kind::Stop:
-      endDecoder();
+      // The decoder stays allocated for the next stream (see AacDecoder); a live one has none.
+      live = false;
       resetPlayback();
       active = false;
       playState = PlayState::Idle;
@@ -261,7 +305,24 @@ void decodeTask(void*) {
   bool active = false;
   bool flushed = false;
   uint8_t chunk[DECODE_CHUNK];
+  uint32_t loggedAt = 0;
+  uint32_t loggedTotal = 0;
+  uint32_t loggedWaiting = 0;
   for (;;) {
+    if (millis() - loggedAt >= UNDERRUN_LOG_MS) {
+      const uint32_t total = underrunsTotal;
+      const uint32_t waiting = underrunsInputWaiting;
+      if (total != loggedTotal) {
+        hostlink::log("underruns: %lu in %lu s (%lu with input waiting), rx %u B, pcm %u frames",
+                  static_cast<unsigned long>(total - loggedTotal),
+                  static_cast<unsigned long>((millis() - loggedAt) / 1000),
+                  static_cast<unsigned long>(waiting - loggedWaiting),
+                  static_cast<unsigned>(xStreamBufferBytesAvailable(rx)), static_cast<unsigned>(pcm.available()));
+      }
+      loggedAt = millis();
+      loggedTotal = total;
+      loggedWaiting = waiting;
+    }
     Command command;
     TickType_t wait = active ? 0 : portMAX_DELAY;
     while (xQueueReceive(commands, &command, wait) == pdTRUE) {
@@ -380,6 +441,8 @@ size_t readPcm(StereoFrame* out, const size_t frames) {
   const size_t got = pcm.read(out, frames);
   if (got < frames && !endReceived) {
     ++underruns;
+    ++underrunsTotal;
+    if (xStreamBufferBytesAvailable(rx) >= UNDERRUN_INPUT_BYTES) ++underrunsInputWaiting;
     // Live: go quiet and build the cushion up again, rather than stutter through many small gaps.
     if (isLive) primed = false;
   }

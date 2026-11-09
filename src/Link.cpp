@@ -10,6 +10,7 @@
 #include <Preferences.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdio>
@@ -59,6 +60,18 @@ bool outOfSequence = false;
 uint32_t lastAckMs = 0;
 uint32_t lastAckRxFree = 0;
 uint32_t lastStatusMs = 0;
+
+// Diagnostics, logged every few seconds while they change: what goes wrong on this end of the link.
+uint32_t gaps = 0;           // frames arriving after a lost or damaged one (the host resends)
+uint32_t rejected = 0;       // audio refused: rx had no room (the host's credit was off) or another stream
+std::atomic<uint32_t> uartErrors{0}; // receive overflows (the UART buffer or FIFO filled up)
+uint32_t lastDiagMs = 0;
+uint32_t loggedBad = 0, loggedGaps = 0, loggedRejected = 0, loggedUart = 0;
+constexpr uint32_t DIAG_LOG_MS = 5000;
+
+void onUartError(hardwareSerial_error_t error) {
+  if (error == UART_BUFFER_FULL_ERROR || error == UART_FIFO_OVF_ERROR) ++uartErrors;
+}
 
 void send(const Type type, const void* payload, const size_t length) {
   uint8_t frame[audiolink::HEADER_BYTES + 128 + audiolink::CRC_BYTES];
@@ -216,7 +229,10 @@ void handleFrame(Port& port) {
   if (parser.seq() != expectedSeq) {
     // A gap means a frame was lost or damaged: ask for a resend from expectedSeq. A duplicate
     // (an older sequence number) is the host already resending, so just acknowledge.
-    if (!audiolink::seqBefore(parser.seq(), expectedSeq)) outOfSequence = true;
+    if (!audiolink::seqBefore(parser.seq(), expectedSeq)) {
+      if (!outOfSequence) ++gaps;
+      outOfSequence = true;
+    }
     ackPending = true;
     ackUrgent = true;
     return;
@@ -224,6 +240,7 @@ void handleFrame(Port& port) {
   if (handleHostFrame(type, parser.payload(), parser.length())) {
     ++expectedSeq;
   } else {
+    if (type == Type::AudioData) ++rejected;
     ackUrgent = true;
   }
   ackPending = true;
@@ -254,6 +271,21 @@ void linkTask(void*) {
       sendAck();
     }
     if (now - lastStatusMs >= audiolink::STATUS_PERIOD_MS) sendStatus();
+    if (now - lastDiagMs >= DIAG_LOG_MS) {
+      lastDiagMs = now;
+      uint32_t bad = 0;
+      for (const Port& port : ports) bad += port.parser.badFrames();
+      const uint32_t uart = uartErrors;
+      if (bad != loggedBad || gaps != loggedGaps || rejected != loggedRejected || uart != loggedUart) {
+        log("link: %lu bad frames, %lu gaps, %lu audio refused, %lu UART overflows in 5 s",
+            static_cast<unsigned long>(bad - loggedBad), static_cast<unsigned long>(gaps - loggedGaps),
+            static_cast<unsigned long>(rejected - loggedRejected), static_cast<unsigned long>(uart - loggedUart));
+        loggedBad = bad;
+        loggedGaps = gaps;
+        loggedRejected = rejected;
+        loggedUart = uart;
+      }
+    }
     if (read == 0) vTaskDelay(1);
   }
 }
@@ -262,6 +294,7 @@ void beginPort(Port& port, const uint32_t baud, const int rxPin, const int txPin
   port.serial->setRxBufferSize(config::UART_RX_BUFFER);
   port.serial->setTxBufferSize(config::UART_TX_BUFFER);
   port.serial->begin(baud, SERIAL_8N1, rxPin, txPin, false, 20000UL, config::UART_RX_FIFO_FULL);
+  port.serial->onReceiveError(onUartError);
   port.up = true;
 }
 

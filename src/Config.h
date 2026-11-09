@@ -44,9 +44,20 @@ constexpr uint8_t FIRMWARE_MINOR = 2;
 
 // RAM is the constraint: Bluetooth Classic takes ~50 KB of heap and the AAC decoder ~30-60 KB, on
 // an ESP32 without PSRAM. The host holds a large queue, so the module only needs to ride out jitter.
-/** Compressed audio waiting to be decoded: about 2 s at 64 kbit/s. */
+/**
+ * Compressed audio waiting to be decoded: about 2 s at 64 kbit/s, 1 s at 128 kbit/s. It is the
+ * cheap cushion (8 KB holds 0.5 s of a 128 kbit/s book but only 46 ms of PCM), and it is what
+ * rides out the host's data pausing (a lost frame or ACK until the host resends). A live stream
+ * keeps at most LIVE_MAX_BUFFERED_MS (~3 KB) here.
+ */
 constexpr size_t RX_BUFFER_BYTES = 16 * 1024;
-/** Decoded stereo frames waiting for the output: about 46 ms at 44.1 kHz. */
+/**
+ * Decoded stereo frames waiting for the output: about 46 ms at 44.1 kHz (8 KB). The decoder
+ * refills it from RX_BUFFER_BYTES far faster than real time, so it only covers Bluetooth asking
+ * for a burst after a stall. Heap is the limit: with these two at 24 KB, ~23 KB stays free while
+ * playing AAC; at 30 KB it fell to ~14 KB with a headset connected and Bluetooth output turned
+ * choppy (packets sent at half the rate) though the buffers never ran dry.
+ */
 constexpr size_t PCM_RING_FRAMES = 2048;
 /** Playback starts once the PCM ring is this full, so the first frames do not underrun. */
 constexpr size_t PCM_PRIME_FRAMES = PCM_RING_FRAMES / 2;
