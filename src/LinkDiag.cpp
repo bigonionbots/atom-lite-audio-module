@@ -22,7 +22,10 @@
 
 namespace {
 
-constexpr int LED_PIN = 27;  // SK6812 on the ATOM Lite
+#ifndef AUDIO_MODULE_LED_PIN
+#define AUDIO_MODULE_LED_PIN 27
+#endif
+constexpr int LED_PIN = AUDIO_MODULE_LED_PIN;  // SK6812 on the ATOM Lite, -1 for none
 constexpr uint8_t LED_LEVEL = 24;
 constexpr size_t RX_BUFFER_BYTES = 8192;
 constexpr size_t TX_BUFFER_BYTES = 8192;
@@ -38,7 +41,7 @@ bool overflowed = false;
 unsigned long lastByteMs = 0;
 
 void showLed(const Led led) {
-  if (led == shownLed) return;
+  if (LED_PIN < 0 || led == shownLed) return;
   shownLed = led;
   switch (led) {
     case Led::Idle:

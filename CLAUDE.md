@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-PlatformIO/Arduino firmware for an M5Stack ATOM Lite (ESP32-PICO-D4, **no PSRAM**) that receives MP3, AAC (ADTS) or µ-law audio from a host board over USB or the Grove UART and plays it to Bluetooth A2DP, a PCM5102A I2S DAC, or a null sink. README.md has the full protocol, wiring and hardware measurements.
+PlatformIO/Arduino firmware for an M5Stack ATOM Lite (ESP32-PICO-D4, **no PSRAM**), or an ESP32-DevKitC with a WROVER module (env `wrover`: PSRAM, no LED, HE-AAC on), that receives MP3, AAC (ADTS) or µ-law audio from a host board over USB or the Grove UART and plays it to Bluetooth A2DP, a PCM5102A I2S DAC, or a null sink. README.md has the full protocol, wiring and hardware measurements.
 
 ## Commands
 
@@ -33,7 +33,8 @@ Pipeline: **Link → Player → Outputs**, each a FreeRTOS task pinned to core 1
 
 ## Constraints to keep in mind
 
-- **RAM is the binding constraint**: ~217 KB free at boot, ~75 KB after Bluetooth Classic, ~50 KB with a decoder running. Don't grow buffers/stacks casually; boot logs heap via LOG. HE-AAC SBR is compiled out (`-DHELIX_NO_AAC_SBR`).
+- Board differences are build flags only (`AUDIO_MODULE_LED_PIN`, `AUDIO_MODULE_BT_NAME`, `AUDIO_MODULE_I2S_*`, `AUDIO_MODULE_UART_*`, `HELIX_NO_AAC_SBR`); keep the sources board-neutral.
+- **RAM is the binding constraint** (ATOM Lite): ~217 KB free at boot, ~75 KB after Bluetooth Classic, ~50 KB with a decoder running. Don't grow buffers/stacks casually; boot logs heap via LOG. HE-AAC SBR is compiled out (`-DHELIX_NO_AAC_SBR`).
 - `huge_app.csv` partition (3 MB app, no OTA) is required for BT Classic + both decoders.
 - `lib/libhelix` is a vendored, **patched** codec-helix v0.9.4; record any change in `lib/libhelix/PATCHES.md`.
 - USB bridge is an FTDI emulation: only 500k/750k/1.5M baud are clean (921600 and 1M garble); no hardware flow control, hence the protocol's credits/CRC/retransmit. Hosts must keep DTR/RTS deasserted or the ATOM resets.

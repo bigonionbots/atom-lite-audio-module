@@ -56,6 +56,26 @@ Diagnostic envs (all on the USB port, see `src/LinkDiag.cpp`):
 - `atom_echo`: echo (`tools/echo_test.py`)
 - `atom_diag` and `atom_beacon`: run at any baud rate set by `AUDIO_MODULE_BAUD`
 
+### ESP32-DevKitC (WROVER)
+
+The same firmware runs on an Espressif ESP32-DevKitC with an ESP32-WROVER(-E) module. That's
+the same chip family as the ATOM Lite, plus PSRAM and an ordinary USB-UART bridge.
+
+```sh
+pio run -e wrover -t upload            # player
+pio run -e wrover_linkdiag -t upload   # link diagnostic (tools/link_diag.py)
+```
+
+- **Pins are the ATOM's:** PCM5102A on GPIO22 (BCK), GPIO19 (LRCK) and GPIO23 (DIN). The UART
+  link is on GPIO32 (module RX) and GPIO26 (module TX). The USB port carries the link too.
+- **Pins to keep free:** GPIO16/17 belong to the WROVER's PSRAM. GPIO0, 2, 5, 12 and 15 are
+  strapping pins.
+- **Status LED:** there isn't one (`AUDIO_MODULE_LED_PIN=-1`).
+- **Bluetooth name:** headphones see "WROVER Audio" (`AUDIO_MODULE_BT_NAME`).
+- **HE-AAC:** PSRAM holds the 51 KB HE-AAC (SBR) state, so HE-AAC sources play in full rather
+  than as their AAC-LC core.
+- **Flashing:** if upload does not start on its own, hold BOOT and tap EN.
+
 ## Protocol
 
 `protocol/AudioLinkProtocol.h` is the whole contract. It is dependency-free C++, and hosts include a
@@ -107,7 +127,7 @@ stereo starves through USB there. ESP-IDF hosts measured 39 KB/s on the same bri
   protocol has credits, a CRC and retransmission.
 - **DTR/RTS:** a USB host should keep both deasserted, or the ATOM's auto-reset circuit resets it.
 
-**Memory** (no PSRAM): about 217 KB is free at boot and about 75 KB once Bluetooth Classic is up.
+**Memory** (ATOM Lite, no PSRAM): about 217 KB is free at boot and about 75 KB once Bluetooth Classic is up.
 That leaves about 50 KB with a decoder running. HE-AAC (SBR) would need another 51 KB contiguous
 block, so it is compiled out (`HELIX_NO_AAC_SBR`). HE-AAC sources play their AAC-LC core.
 

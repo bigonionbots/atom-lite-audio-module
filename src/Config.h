@@ -37,6 +37,16 @@
 #define AUDIO_MODULE_UART_BAUD 500000
 #endif
 
+// Status LED: the ATOM Lite's SK6812 on GPIO27. -1 builds without one (ESP32-DevKitC).
+#ifndef AUDIO_MODULE_LED_PIN
+#define AUDIO_MODULE_LED_PIN 27
+#endif
+
+// The name Bluetooth headphones see.
+#ifndef AUDIO_MODULE_BT_NAME
+#define AUDIO_MODULE_BT_NAME "ATOM Lite Audio"
+#endif
+
 namespace config {
 
 constexpr uint8_t FIRMWARE_MAJOR = 0;
@@ -74,12 +84,12 @@ constexpr uint8_t UART_RX_FIFO_FULL = 32;
 
 /** A2DP sources always send 44.1 kHz stereo (SBC). */
 constexpr uint32_t BT_SAMPLE_RATE = 44100;
-constexpr const char* BT_LOCAL_NAME = "ATOM Lite Audio";
+constexpr const char* BT_LOCAL_NAME = AUDIO_MODULE_BT_NAME;
 
 /** Another port takes over the link once the active one has been silent this long (Link.h). */
 constexpr uint32_t LINK_TAKEOVER_MS = 3000;
 
-constexpr int LED_PIN = 27;
+constexpr int LED_PIN = AUDIO_MODULE_LED_PIN;
 constexpr uint8_t LED_LEVEL = 20;
 
 // Tasks. The Bluetooth stack runs on core 0; ours share core 1. The link outranks the decoder so

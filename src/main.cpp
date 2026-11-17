@@ -18,6 +18,7 @@
 #if AUDIO_MODULE_DIAG_MODE == 0
 
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 
 #include "Config.h"
 #include "Link.h"
@@ -33,7 +34,7 @@ uint32_t shownColor = 0xFFFFFFFF;
 bool failed = false;
 
 void showColor(const uint32_t rgb) {
-  if (rgb == shownColor) return;
+  if (config::LED_PIN < 0 || rgb == shownColor) return;
   shownColor = rgb;
   rgbLedWrite(config::LED_PIN, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
 }
@@ -82,6 +83,13 @@ void setup() {
   hostlink::log("heap: boot %lu (block %lu), now %lu (block %lu)", static_cast<unsigned long>(heapAtBoot),
                 static_cast<unsigned long>(blockAtBoot), static_cast<unsigned long>(ESP.getFreeHeap()),
                 static_cast<unsigned long>(ESP.getMaxAllocHeap()));
+  // With PSRAM (WROVER) the heap figures above include it; show internal RAM and PSRAM apart.
+  if (psramFound()) {
+    hostlink::log("internal %lu free (block %lu), psram %lu of %lu free",
+                  static_cast<unsigned long>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                  static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                  static_cast<unsigned long>(ESP.getFreePsram()), static_cast<unsigned long>(ESP.getPsramSize()));
+  }
 }
 
 void loop() {
