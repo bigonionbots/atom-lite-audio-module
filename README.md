@@ -131,6 +131,15 @@ stereo starves through USB there. ESP-IDF hosts measured 39 KB/s on the same bri
 That leaves about 50 KB with a decoder running. HE-AAC (SBR) would need another 51 KB contiguous
 block, so it is compiled out (`HELIX_NO_AAC_SBR`). HE-AAC sources play their AAC-LC core.
 
+**Bluetooth connection times** (DevKitC, one test headset): a remembered headset connects about 1 s
+after boot, and sound starts about 20 ms after the connection. A page the headset misses costs about
+5 s, and a failed page is retried at once. ESP32-A2DP on its own took 40-70 s: it sleeps 10 s at
+stack-up, ticks every 10 s, and mistakes a failed media check for a connection (`ModuleA2dpSource`
+in `src/Outputs.cpp` replaces those parts). One trap when testing from a PC: opening the port
+resets a DevKitC or ATOM, so the headset is left holding a dead link and refuses pages until it
+gives up on it (about 15 s with the test headset). A host should send `BtDisconnect` before it
+resets or powers off the module.
+
 ## Layout
 
 ```

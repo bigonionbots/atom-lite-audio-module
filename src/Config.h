@@ -85,6 +85,11 @@ constexpr uint8_t UART_RX_FIFO_FULL = 32;
 /** A2DP sources always send 44.1 kHz stereo (SBC). */
 constexpr uint32_t BT_SAMPLE_RATE = 44100;
 constexpr const char* BT_LOCAL_NAME = AUDIO_MODULE_BT_NAME;
+/**
+ * The A2DP state machine's tick (ESP32-A2DP uses 10 s). It paces reconnect attempts, and a
+ * connect attempt is abandoned after two ticks; a page normally answers within about 5 s.
+ */
+constexpr uint32_t BT_HEARTBEAT_MS = 4000;
 
 /** Another port takes over the link once the active one has been silent this long (Link.h). */
 constexpr uint32_t LINK_TAKEOVER_MS = 3000;

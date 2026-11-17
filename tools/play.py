@@ -222,20 +222,28 @@ def main():
     stream_id = 1
     host.send(T["StreamStart"], struct.pack("<BBI", stream_id, codec, 0))
     start = time.monotonic()
-    last_print = 0
     sent = 0
+    streaming = True
+
+    # Status prints from its own thread: send() blocks while the module holds back credit (for
+    # example while a Bluetooth headset connects), and the console should not go quiet then.
+    def report():
+        while streaming:
+            time.sleep(1)
+            if streaming and host.status:
+                print(f"{time.monotonic() - start:6.1f}s sent {sent:8d} B resends {host.resends:3d} | "
+                      f"{describe(host.status)}", flush=True)
+
+    threading.Thread(target=report, daemon=True).start()
     while True:
         chunk = source.read(AUDIO_CHUNK)
         if not chunk:
             break
         host.send(T["AudioData"], bytes([stream_id]) + chunk, audio_bytes=len(chunk) + 1)
         sent += len(chunk)
-        now = time.monotonic()
-        if now - last_print >= 1 and host.status:
-            last_print = now
-            print(f"{now - start:6.1f}s sent {sent:8d} B resends {host.resends:3d} | {describe(host.status)}")
-        if args.seconds and now - start > args.seconds:
+        if args.seconds and time.monotonic() - start > args.seconds:
             break
+    streaming = False
     host.send(T["StreamEnd"], bytes([stream_id]))
     while True:
         time.sleep(1)
